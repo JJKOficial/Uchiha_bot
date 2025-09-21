@@ -1,55 +1,57 @@
-const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion } = require("@whiskeysockets/baileys")
+// index.js
+import makeWASocket, { useMultiFileAuthState, DisconnectReason } from "@whiskeysockets/baileys"
+import { Boom } from "@hapi/boom"
 
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState("auth_info")
-    const { version } = await fetchLatestBaileysVersion()
 
     const sock = makeWASocket({
-        version,
-        auth: state,
-        printQRInTerminal: false // não vai gerar QR
+        printQRInTerminal: false, // Desativa QR code
+        auth: state
     })
 
-    // Salva sessão
-    sock.ev.on("creds.update", saveCreds)
-
-    // Se ainda não estiver registrado, pede código via número de telefone
+    // Exibe código de 8 dígitos no terminal
     if (!sock.authState.creds.registered) {
-        const phoneNumber = "+244939862061" // SEU NÚMERO AQUI
-        const code = await sock.requestPairingCode(phoneNumber)
-        console.log("📲 Digite esse código no WhatsApp para conectar:", code)
+        const code = await sock.requestPairingCode("244939862061") // <-- seu número
+        console.log("📲 Seu código de emparelhamento é:", code)
     }
 
-    // Eventos de conexão
-    sock.ev.on("connection.update", (update) => {
-        const { connection } = update
-        if (connection === "open") {
-            console.log("✅ Uchiha_bot conectado com sucesso!")
-        } else if (connection === "close") {
-            console.log("⚠️ Conexão perdida. Tentando reconectar...")
-            startBot()
-        }
-    })
-
-    // Resposta às mensagens
+    // Evento de mensagens recebidas
     sock.ev.on("messages.upsert", async (m) => {
         const msg = m.messages[0]
         if (!msg.message) return
-
         const from = msg.key.remoteJid
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text
 
-        if (!text) return
+        console.log("💬 Mensagem recebida de", from, ":", text)
 
-        if (text.toLowerCase() === "olá") {
-            await sock.sendMessage(from, { text: "Oi, eu sou o Uchiha_bot 😏🔥" })
-        } else if (text.toLowerCase() === "como está?") {
-            await sock.sendMessage(from, { text: "Estou bem, pronto pra missão! 💀" })
-        } else if (text.includes("http") || text.includes("https")) {
-            await sock.sendMessage(from, { text: "🚫 Links não são permitidos neste grupo!" })
-            await sock.groupParticipantsUpdate(from, [msg.key.participant], "remove")
+        // Comando simples
+        if (text?.toLowerCase() === "!ping") {
+            await sock.sendMessage(from, { text: "🏓 Pong!" })
+        }
+
+        if (text?.toLowerCase() === "!dono") {
+            await sock.sendMessage(from, { text: "👑 O dono sou eu: +244939862061 (Madara Uchiha)" })
         }
     })
+
+    // Evento de conexão
+    sock.ev.on("connection.update", (update) => {
+        const { connection, lastDisconnect } = update
+        if (connection === "close") {
+            const shouldReconnect =
+                lastDisconnect?.error instanceof Boom &&
+                lastDisconnect.error.output.statusCode !== DisconnectReason.loggedOut
+            console.log("⚠️ Conexão fechada. Reconectar:", shouldReconnect)
+            if (shouldReconnect) {
+                startBot()
+            }
+        } else if (connection === "open") {
+            console.log("✅ Bot conectado com sucesso!")
+        }
+    })
+
+    sock.ev.on("creds.update", saveCreds)
 }
 
 startBot()
